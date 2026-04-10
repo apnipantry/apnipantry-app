@@ -11,7 +11,7 @@ import {
   addCategory,
   updateItem,
   updateCategory,
-} from './lib/supabase'
+} from '../lib/supabase'
 
 // ── Error boundary — catches render crashes and shows what broke ──
 class ErrorBoundary extends Component {
@@ -108,6 +108,32 @@ function MainInner({ profile, onProfileUpdate }) {
       next.has(id) ? next.delete(id) : next.add(id)
       return next
     })
+  }
+
+  // Optimistic update — update local state immediately, then sync to DB.
+  // Without this, the checkbox appears frozen until page refresh because
+  // Supabase realtime doesn't fire for the user who made the change.
+  async function handleToggleCart(itemId, newInCart) {
+    // Update local state immediately so UI responds at once
+    setCats(prev => prev.map(cat => ({
+      ...cat,
+      items: (cat.items || []).map(item =>
+        item.id === itemId ? { ...item, in_cart: newInCart } : item
+      )
+    })))
+    // Then persist to DB (fire and forget — loadAll on realtime handles other clients)
+    try {
+      await toggleCart(itemId, newInCart)
+    } catch (e) {
+      console.error('Toggle cart error:', e)
+      // Revert local state if DB call failed
+      setCats(prev => prev.map(cat => ({
+        ...cat,
+        items: (cat.items || []).map(item =>
+          item.id === itemId ? { ...item, in_cart: !newInCart } : item
+        )
+      })))
+    }
   }
 
   async function handleAddItem(catId) {
@@ -212,7 +238,7 @@ function MainInner({ profile, onProfileUpdate }) {
                 <div key={item.id} style={S.itemRow}>
                   {isParent
                     ? <input type="checkbox" checked={!!item.in_cart}
-                        onChange={() => toggleCart(item.id, !item.in_cart)}
+                        onChange={() => handleToggleCart(item.id, !item.in_cart)}
                         style={S.check}/>
                     : <div style={{...S.dot,
                         background: item.in_cart ? '#2D6A4F' : 'rgba(45,106,79,0.2)'}}/>
@@ -279,7 +305,7 @@ function MainInner({ profile, onProfileUpdate }) {
                         </div>
                         {isParent &&
                           <button style={S.delBtn}
-                            onClick={() => toggleCart(item.id, false)}>×</button>}
+                            onClick={() => handleToggleCart(item.id, false)}>×</button>}
                       </div>
                     ))}
                     <div style={S.platFooter}>
@@ -432,7 +458,7 @@ function SettingsSheet({ profile, members, onClose }) {
     setCreating(true)
     setError('')
     try {
-      const { createInvite } = await import('./lib/supabase')
+      const { createInvite } = await import('../lib/supabase')
       const result = await createInvite({ role: inviteRole, hours: 48 })
       localStorage.setItem(getKey(inviteRole), JSON.stringify(result))
       setInvite(result)
