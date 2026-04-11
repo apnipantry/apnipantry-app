@@ -110,23 +110,25 @@ function MainInner({ profile, onProfileUpdate }) {
     })
   }
 
-  // Optimistic update — update local state immediately, then sync to DB.
-  // Without this, the checkbox appears frozen until page refresh because
-  // Supabase realtime doesn't fire for the user who made the change.
+  // Optimistic cart toggle — updates local state immediately.
+  // Fixes two bugs:
+  //   1. iOS Safari: onChange on <input type="checkbox"> fires inconsistently.
+  //      onClick fires reliably on all browsers including iOS Safari.
+  //   2. All browsers: Supabase realtime doesn't fire for the user who made
+  //      the change, so without this the checkbox appears frozen until refresh.
   async function handleToggleCart(itemId, newInCart) {
-    // Update local state immediately so UI responds at once
+    // Update local state immediately so the UI responds at once
     setCats(prev => prev.map(cat => ({
       ...cat,
       items: (cat.items || []).map(item =>
         item.id === itemId ? { ...item, in_cart: newInCart } : item
       )
     })))
-    // Then persist to DB (fire and forget — loadAll on realtime handles other clients)
     try {
       await toggleCart(itemId, newInCart)
     } catch (e) {
       console.error('Toggle cart error:', e)
-      // Revert local state if DB call failed
+      // Revert on failure
       setCats(prev => prev.map(cat => ({
         ...cat,
         items: (cat.items || []).map(item =>
@@ -238,7 +240,8 @@ function MainInner({ profile, onProfileUpdate }) {
                 <div key={item.id} style={S.itemRow}>
                   {isParent
                     ? <input type="checkbox" checked={!!item.in_cart}
-                        onChange={() => handleToggleCart(item.id, !item.in_cart)}
+                        onChange={() => {}} // needed to suppress React warning for controlled input
+                        onClick={() => handleToggleCart(item.id, !item.in_cart)}
                         style={S.check}/>
                     : <div style={{...S.dot,
                         background: item.in_cart ? '#2D6A4F' : 'rgba(45,106,79,0.2)'}}/>
@@ -605,9 +608,12 @@ function InfoRow({ label, value, valueStyle={} }) {
 }
 
 function GearIcon() {
+  // Use explicit stroke colour — iOS Safari does not reliably inherit
+  // currentColor from a parent button element into SVG strokes
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      stroke="#4A6357" strokeWidth="1.8" strokeLinecap="round"
+      style={{ display:'block' }}>
       <circle cx="12" cy="12" r="3"/>
       <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
     </svg>
@@ -626,7 +632,8 @@ const S = {
   gearBtn:   { width:'36px', height:'36px', display:'flex', alignItems:'center',
                justifyContent:'center', background:'white',
                border:'0.5px solid rgba(45,106,79,0.2)', borderRadius:'10px',
-               color:'#4A6357', cursor:'pointer', flexShrink:0 },
+               color:'#4A6357', cursor:'pointer', flexShrink:0,
+               WebkitTapHighlightColor:'transparent' },
   tabs:      { display:'flex', border:'0.5px solid rgba(45,106,79,0.2)',
                borderRadius:'8px', overflow:'hidden', marginBottom:'1.25rem' },
   tab:       { flex:1, padding:'8px', fontSize:'13px', textAlign:'center',
