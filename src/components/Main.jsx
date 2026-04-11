@@ -110,32 +110,29 @@ function MainInner({ profile, onProfileUpdate }) {
     })
   }
 
-  // Optimistic cart toggle — updates local state immediately.
-  // Fixes two bugs:
-  //   1. iOS Safari: onChange on <input type="checkbox"> fires inconsistently.
-  //      onClick fires reliably on all browsers including iOS Safari.
-  //   2. All browsers: Supabase realtime doesn't fire for the user who made
-  //      the change, so without this the checkbox appears frozen until refresh.
-  async function handleToggleCart(itemId, newInCart) {
-    // Update local state immediately so the UI responds at once
+  // Update qty in cart — optimistic, same pattern as handleToggleCart
+  async function handleCartQtyChange(itemId, newQty) {
     setCats(prev => prev.map(cat => ({
       ...cat,
-      items: (cat.items || []).map(item =>
-        item.id === itemId ? { ...item, in_cart: newInCart } : item
+      items: (cat.items || []).map(i =>
+        i.id === itemId ? { ...i, qty: newQty } : i
       )
     })))
-    try {
-      await toggleCart(itemId, newInCart)
-    } catch (e) {
-      console.error('Toggle cart error:', e)
-      // Revert on failure
-      setCats(prev => prev.map(cat => ({
-        ...cat,
-        items: (cat.items || []).map(item =>
-          item.id === itemId ? { ...item, in_cart: !newInCart } : item
-        )
-      })))
-    }
+    try { await updateItem(itemId, { qty: newQty }) }
+    catch (e) { console.error('Qty update error:', e); await loadAll() }
+  }
+
+  // Update cost in cart — optimistic
+  async function handleCartCostChange(itemId, newCost) {
+    const n = parseInt(newCost) || 0
+    setCats(prev => prev.map(cat => ({
+      ...cat,
+      items: (cat.items || []).map(i =>
+        i.id === itemId ? { ...i, cost_inr: n } : i
+      )
+    })))
+    try { await updateItem(itemId, { cost_inr: n }) }
+    catch (e) { console.error('Cost update error:', e); await loadAll() }
   }
 
   async function handleAddItem(catId) {
@@ -240,8 +237,7 @@ function MainInner({ profile, onProfileUpdate }) {
                 <div key={item.id} style={S.itemRow}>
                   {isParent
                     ? <input type="checkbox" checked={!!item.in_cart}
-                        onChange={() => {}} // needed to suppress React warning for controlled input
-                        onClick={() => handleToggleCart(item.id, !item.in_cart)}
+                        onChange={() => toggleCart(item.id, !item.in_cart)}
                         style={S.check}/>
                     : <div style={{...S.dot,
                         background: item.in_cart ? '#2D6A4F' : 'rgba(45,106,79,0.2)'}}/>
@@ -295,21 +291,15 @@ function MainInner({ profile, onProfileUpdate }) {
                       <div style={S.platTotal}>₹{sub.toLocaleString('en-IN')}</div>
                     </div>
                     {items.map(item => (
-                      <div key={item.id} style={S.cartItem}>
-                        <div style={{ flex:1, fontSize:'13px' }}>
-                          {item.name}
-                          <span style={S.forTag}>for {item.for_whom}</span>
-                        </div>
-                        <div style={{ fontSize:'12px', color:'#8FAF9F', marginRight:'8px' }}>
-                          {item.qty}
-                        </div>
-                        <div style={{ fontSize:'13px', minWidth:'52px', textAlign:'right' }}>
-                          {item.cost_inr ? `₹${item.cost_inr}` : '—'}
-                        </div>
-                        {isParent &&
-                          <button style={S.delBtn}
-                            onClick={() => handleToggleCart(item.id, false)}>×</button>}
-                      </div>
+                      <CartItemRow
+                        key={item.id}
+                        item={item}
+                        members={members}
+                        isParent={isParent}
+                        onRemove={() => handleToggleCart(item.id, false)}
+                        onQtyChange={(newQty) => handleCartQtyChange(item.id, newQty)}
+                        onCostChange={(newCost) => handleCartCostChange(item.id, newCost)}
+                      />
                     ))}
                     <div style={S.platFooter}>
                       {isParent
@@ -608,12 +598,9 @@ function InfoRow({ label, value, valueStyle={} }) {
 }
 
 function GearIcon() {
-  // Use explicit stroke colour — iOS Safari does not reliably inherit
-  // currentColor from a parent button element into SVG strokes
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
-      stroke="#4A6357" strokeWidth="1.8" strokeLinecap="round"
-      style={{ display:'block' }}>
+      stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
       <circle cx="12" cy="12" r="3"/>
       <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
     </svg>
@@ -632,8 +619,7 @@ const S = {
   gearBtn:   { width:'36px', height:'36px', display:'flex', alignItems:'center',
                justifyContent:'center', background:'white',
                border:'0.5px solid rgba(45,106,79,0.2)', borderRadius:'10px',
-               color:'#4A6357', cursor:'pointer', flexShrink:0,
-               WebkitTapHighlightColor:'transparent' },
+               color:'#4A6357', cursor:'pointer', flexShrink:0 },
   tabs:      { display:'flex', border:'0.5px solid rgba(45,106,79,0.2)',
                borderRadius:'8px', overflow:'hidden', marginBottom:'1.25rem' },
   tab:       { flex:1, padding:'8px', fontSize:'13px', textAlign:'center',
@@ -682,8 +668,21 @@ const S = {
   platName:  { fontSize:'14px', fontWeight:'500', color:'#1A2E22' },
   platSub:   { fontSize:'12px', color:'#8FAF9F' },
   platTotal: { fontSize:'14px', fontWeight:'500', color:'#1A2E22' },
-  cartItem:  { display:'flex', alignItems:'center', gap:'8px', padding:'0.6rem 1rem',
-               borderBottom:'0.5px solid rgba(45,106,79,0.06)' },
+  cartItem:  { padding:'0.6rem 1rem', borderBottom:'0.5px solid rgba(45,106,79,0.06)' },
+  cartItemTop:{ display:'flex', alignItems:'center', gap:'8px' },
+  cartItemMeta:{ display:'flex', alignItems:'center', gap:'6px', marginTop:'4px',
+                paddingLeft:'0' },
+  cartAdded:  { fontSize:'10px', color:'#8FAF9F' },
+  cartQtyWrap:{ display:'flex', alignItems:'center', gap:'4px' },
+  cartQtyInput:{ width:'64px', padding:'3px 6px', border:'0.5px solid rgba(45,106,79,0.2)',
+                 borderRadius:'6px', fontSize:'12px', color:'#1A2E22',
+                 background:'white', fontFamily:'inherit', textAlign:'center',
+                 WebkitAppearance:'none' },
+  cartCostInput:{ width:'64px', padding:'3px 6px', border:'0.5px solid rgba(45,106,79,0.2)',
+                  borderRadius:'6px', fontSize:'12px', color:'#1A2E22',
+                  background:'white', fontFamily:'inherit', textAlign:'right',
+                  WebkitAppearance:'none' },
+  cartQtyLabel:{ fontSize:'11px', color:'#8FAF9F' },
   platFooter:{ padding:'0.75rem 1rem', display:'flex', alignItems:'center',
                justifyContent:'space-between', background:'#FDFAF5' },
   orderBtn:  { background:'#2D6A4F', color:'white', border:'none',
@@ -1006,4 +1005,92 @@ const SH = {
   btn:        { width:'100%', padding:'12px', background:'#2D6A4F', color:'white',
                 border:'none', borderRadius:'8px', fontSize:'14px',
                 fontWeight:'500', cursor:'pointer', fontFamily:'inherit' },
+}
+
+// ── CartItemRow ───────────────────────────────────────────────
+// Shows item name, who it's for, who added it, and editable
+// qty + cost fields inline. Parents can edit; members see read-only.
+function CartItemRow({ item, members, isParent, onRemove, onQtyChange, onCostChange }) {
+  const [qty, setQty]   = useState(item.qty || '')
+  const [cost, setCost] = useState(item.cost_inr ? String(item.cost_inr) : '')
+
+  // Keep local state in sync if parent re-fetches data
+  useEffect(() => { setQty(item.qty || '') },       [item.qty])
+  useEffect(() => { setCost(item.cost_inr ? String(item.cost_inr) : '') }, [item.cost_inr])
+
+  // Find who added this item
+  const adder = members?.find(m => m.id === item.added_by)
+  const adderLabel = adder ? adder.name : null
+
+  function commitQty() {
+    const trimmed = qty.trim()
+    if (trimmed && trimmed !== item.qty) onQtyChange(trimmed)
+  }
+
+  function commitCost() {
+    const n = parseInt(cost) || 0
+    if (n !== item.cost_inr) onCostChange(n)
+  }
+
+  return (
+    <div style={S.cartItem}>
+      {/* Top row: name + for tag + remove */}
+      <div style={S.cartItemTop}>
+        <div style={{ flex:1, fontSize:'13px', color:'#1A2E22', minWidth:0 }}>
+          {item.name}
+          <span style={S.forTag}>for {item.for_whom}</span>
+        </div>
+        {isParent && (
+          <button style={S.delBtn} onClick={onRemove}>×</button>
+        )}
+      </div>
+
+      {/* Bottom row: added by + editable qty + editable cost */}
+      <div style={S.cartItemMeta}>
+
+        {/* Who added */}
+        {adderLabel && (
+          <span style={S.cartAdded}>added by {adderLabel} ·</span>
+        )}
+
+        {/* Qty — editable for parents */}
+        <div style={S.cartQtyWrap}>
+          <span style={S.cartQtyLabel}>qty</span>
+          {isParent ? (
+            <input
+              style={S.cartQtyInput}
+              value={qty}
+              onChange={e => setQty(e.target.value)}
+              onBlur={commitQty}
+              onKeyDown={e => e.key === 'Enter' && e.target.blur()}
+              placeholder="qty"
+            />
+          ) : (
+            <span style={{ fontSize:'12px', color:'#4A6357' }}>{item.qty || '—'}</span>
+          )}
+        </div>
+
+        {/* Cost — editable for parents */}
+        <div style={S.cartQtyWrap}>
+          <span style={S.cartQtyLabel}>₹</span>
+          {isParent ? (
+            <input
+              style={S.cartCostInput}
+              value={cost}
+              type="number"
+              onChange={e => setCost(e.target.value)}
+              onBlur={commitCost}
+              onKeyDown={e => e.key === 'Enter' && e.target.blur()}
+              placeholder="0"
+            />
+          ) : (
+            <span style={{ fontSize:'12px', color:'#4A6357' }}>
+              {item.cost_inr ? item.cost_inr.toLocaleString('en-IN') : '—'}
+            </span>
+          )}
+        </div>
+
+      </div>
+    </div>
+  )
 }
