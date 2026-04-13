@@ -110,29 +110,47 @@ function MainInner({ profile, onProfileUpdate }) {
     })
   }
 
-  // Update qty in cart — optimistic, same pattern as handleToggleCart
-  async function handleCartQtyChange(itemId, newQty) {
+  // Optimistic cart toggle.
+  // For members: only allowed to check (false→true). Cannot uncheck.
+  // For parents: full toggle both ways.
+  async function handleToggleCart(itemId, newInCart, callerIsParent) {
+    if (!callerIsParent && !newInCart) return // members cannot uncheck
     setCats(prev => prev.map(cat => ({
       ...cat,
       items: (cat.items || []).map(i =>
-        i.id === itemId ? { ...i, qty: newQty } : i
+        i.id === itemId ? { ...i, in_cart: newInCart } : i
       )
     })))
-    try { await updateItem(itemId, { qty: newQty }) }
-    catch (e) { console.error('Qty update error:', e); await loadAll() }
+    try {
+      await toggleCart(itemId, newInCart)
+    } catch (e) {
+      console.error('Toggle cart error:', e)
+      setCats(prev => prev.map(cat => ({
+        ...cat,
+        items: (cat.items || []).map(i =>
+          i.id === itemId ? { ...i, in_cart: !newInCart } : i
+        )
+      })))
+    }
   }
 
-  // Update cost in cart — optimistic
+  async function handleCartQtyChange(itemId, newQty) {
+    setCats(prev => prev.map(cat => ({
+      ...cat,
+      items: (cat.items||[]).map(i => i.id===itemId ? {...i, qty:newQty} : i)
+    })))
+    try { await updateItem(itemId, { qty: newQty }) }
+    catch (e) { console.error('Qty error:', e); loadAll() }
+  }
+
   async function handleCartCostChange(itemId, newCost) {
     const n = parseInt(newCost) || 0
     setCats(prev => prev.map(cat => ({
       ...cat,
-      items: (cat.items || []).map(i =>
-        i.id === itemId ? { ...i, cost_inr: n } : i
-      )
+      items: (cat.items||[]).map(i => i.id===itemId ? {...i, cost_inr:n} : i)
     })))
     try { await updateItem(itemId, { cost_inr: n }) }
-    catch (e) { console.error('Cost update error:', e); await loadAll() }
+    catch (e) { console.error('Cost error:', e); loadAll() }
   }
 
   async function handleAddItem(catId) {
@@ -235,13 +253,22 @@ function MainInner({ profile, onProfileUpdate }) {
             <div style={S.catBody}>
               {(cat.items||[]).map(item => (
                 <div key={item.id} style={S.itemRow}>
-                  {isParent
-                    ? <input type="checkbox" checked={!!item.in_cart}
-                        onChange={() => toggleCart(item.id, !item.in_cart)}
-                        style={S.check}/>
-                    : <div style={{...S.dot,
-                        background: item.in_cart ? '#2D6A4F' : 'rgba(45,106,79,0.2)'}}/>
-                  }
+                  {isParent ? (
+                    // Parent: full toggle both ways
+                    <input type="checkbox" checked={!!item.in_cart}
+                      onChange={() => {}}
+                      onClick={() => handleToggleCart(item.id, !item.in_cart, true)}
+                      style={S.check}/>
+                  ) : item.in_cart ? (
+                    // Member: item already in cart — show locked green dot
+                    <div style={{...S.dot, background:'#2D6A4F'}} title="In cart"/>
+                  ) : (
+                    // Member: item not in cart — show tappable checkbox to request
+                    <input type="checkbox" checked={false}
+                      onChange={() => {}}
+                      onClick={() => handleToggleCart(item.id, true, false)}
+                      style={S.check}/>
+                  )}
                   <div style={S.itemInfo}>
                     <div style={S.itemName}>
                       {item.name}
@@ -295,10 +322,11 @@ function MainInner({ profile, onProfileUpdate }) {
                         key={item.id}
                         item={item}
                         members={members}
+                        profile={profile}
                         isParent={isParent}
-                        onRemove={() => handleToggleCart(item.id, false)}
-                        onQtyChange={(newQty) => handleCartQtyChange(item.id, newQty)}
-                        onCostChange={(newCost) => handleCartCostChange(item.id, newCost)}
+                        onRemove={() => handleToggleCart(item.id, false, true)}
+                        onQtyChange={qty  => handleCartQtyChange(item.id, qty)}
+                        onCostChange={cost => handleCartCostChange(item.id, cost)}
                       />
                     ))}
                     <div style={S.platFooter}>
@@ -668,21 +696,22 @@ const S = {
   platName:  { fontSize:'14px', fontWeight:'500', color:'#1A2E22' },
   platSub:   { fontSize:'12px', color:'#8FAF9F' },
   platTotal: { fontSize:'14px', fontWeight:'500', color:'#1A2E22' },
-  cartItem:  { padding:'0.6rem 1rem', borderBottom:'0.5px solid rgba(45,106,79,0.06)' },
-  cartItemTop:{ display:'flex', alignItems:'center', gap:'8px' },
-  cartItemMeta:{ display:'flex', alignItems:'center', gap:'6px', marginTop:'4px',
-                paddingLeft:'0' },
-  cartAdded:  { fontSize:'10px', color:'#8FAF9F' },
-  cartQtyWrap:{ display:'flex', alignItems:'center', gap:'4px' },
-  cartQtyInput:{ width:'64px', padding:'3px 6px', border:'0.5px solid rgba(45,106,79,0.2)',
-                 borderRadius:'6px', fontSize:'12px', color:'#1A2E22',
-                 background:'white', fontFamily:'inherit', textAlign:'center',
-                 WebkitAppearance:'none' },
-  cartCostInput:{ width:'64px', padding:'3px 6px', border:'0.5px solid rgba(45,106,79,0.2)',
-                  borderRadius:'6px', fontSize:'12px', color:'#1A2E22',
-                  background:'white', fontFamily:'inherit', textAlign:'right',
-                  WebkitAppearance:'none' },
-  cartQtyLabel:{ fontSize:'11px', color:'#8FAF9F' },
+  cartItem:      { padding:'0.6rem 1rem', borderBottom:'0.5px solid rgba(45,106,79,0.06)' },
+  cartItemTop:   { display:'flex', alignItems:'center', gap:'8px' },
+  cartItemMeta:  { display:'flex', alignItems:'center', gap:'6px', marginTop:'4px', flexWrap:'wrap' },
+  cartAdded:     { fontSize:'10px', color:'#8FAF9F' },
+  cartMemberBadge:{ fontSize:'10px', padding:'1px 7px', borderRadius:'999px',
+                    background:'#FAEEDA', color:'#633806', fontWeight:'500' },
+  cartQtyWrap:   { display:'flex', alignItems:'center', gap:'4px' },
+  cartQtyLabel:  { fontSize:'11px', color:'#8FAF9F' },
+  cartQtyInput:  { width:'72px', padding:'3px 6px', border:'0.5px solid rgba(45,106,79,0.2)',
+                   borderRadius:'6px', fontSize:'12px', color:'#1A2E22',
+                   background:'white', fontFamily:'inherit', textAlign:'center',
+                   WebkitAppearance:'none' },
+  cartCostInput: { width:'64px', padding:'3px 6px', border:'0.5px solid rgba(45,106,79,0.2)',
+                   borderRadius:'6px', fontSize:'12px', color:'#1A2E22',
+                   background:'white', fontFamily:'inherit', textAlign:'right',
+                   WebkitAppearance:'none' },
   platFooter:{ padding:'0.75rem 1rem', display:'flex', alignItems:'center',
                justifyContent:'space-between', background:'#FDFAF5' },
   orderBtn:  { background:'#2D6A4F', color:'white', border:'none',
@@ -1008,17 +1037,22 @@ const SH = {
 }
 
 // ── CartItemRow ───────────────────────────────────────────────
-// Read-only by default. Parents tap ✎ to enter edit mode.
-function CartItemRow({ item, members, isParent, onRemove, onQtyChange, onCostChange }) {
+// Read-only by default. Parents tap ✎ to edit qty + cost.
+// Clearly flags items requested by members with an amber badge.
+function CartItemRow({ item, members, profile, isParent, onRemove, onQtyChange, onCostChange }) {
   const [editing, setEditing] = useState(false)
   const [qty, setQty]         = useState(item.qty || '')
   const [cost, setCost]       = useState(item.cost_inr ? String(item.cost_inr) : '')
 
-  // Sync if parent re-fetches
   useEffect(() => { if (!editing) setQty(item.qty || '') },  [item.qty, editing])
   useEffect(() => { if (!editing) setCost(item.cost_inr ? String(item.cost_inr) : '') }, [item.cost_inr, editing])
 
-  const adder = members?.find(m => m.id === item.added_by)
+  // Who added this item?
+  const adder       = members?.find(m => m.id === item.added_by)
+  const adderName   = adder?.name || null
+  const addedByMe   = item.added_by === profile?.id
+  // Was it added by a member (not a parent)?
+  const addedByMember = adder && adder.role === 'member'
 
   function saveAndClose() {
     const trimmedQty = qty.trim()
@@ -1029,18 +1063,30 @@ function CartItemRow({ item, members, isParent, onRemove, onQtyChange, onCostCha
   }
 
   return (
-    <div style={S.cartItem}>
-      {/* Top row — always visible */}
+    <div style={{
+      ...S.cartItem,
+      // Subtle amber left border for member-requested items
+      borderLeft: addedByMember ? '3px solid #F4A261' : '3px solid transparent',
+    }}>
+
+      {/* Top row — name, for-tag, action buttons */}
       <div style={S.cartItemTop}>
         <div style={{ flex:1, fontSize:'13px', color:'#1A2E22', minWidth:0 }}>
           {item.name}
           <span style={S.forTag}>for {item.for_whom}</span>
         </div>
+
+        {/* Member badge — only shown to parents so they know to review */}
+        {isParent && addedByMember && (
+          <span style={S.cartMemberBadge}>requested</span>
+        )}
+
+        {/* Edit / Done / Remove — parents only */}
         {isParent && !editing && (
           <button style={S.editBtn} onClick={() => setEditing(true)}>✎</button>
         )}
         {isParent && editing && (
-          <button style={{ ...S.editBtn, color:'#2D6A4F', fontWeight:'500' }}
+          <button style={{ ...S.editBtn, color:'#2D6A4F', fontWeight:'600' }}
             onClick={saveAndClose}>Done</button>
         )}
         {isParent && !editing && (
@@ -1048,43 +1094,42 @@ function CartItemRow({ item, members, isParent, onRemove, onQtyChange, onCostCha
         )}
       </div>
 
-      {/* Meta row — added by + qty/cost (read-only or editable) */}
+      {/* Meta row — added by + qty + cost */}
       <div style={S.cartItemMeta}>
-        {adder && (
-          <span style={S.cartAdded}>added by {adder.name}</span>
+
+        {/* Who added */}
+        {adderName && (
+          <span style={S.cartAdded}>
+            {addedByMe ? 'added by you' : `added by ${adderName}`}
+          </span>
         )}
-        {adder && <span style={S.cartAdded}>·</span>}
+        {adderName && <span style={S.cartAdded}>·</span>}
 
         {editing ? (
-          /* Edit mode — qty and cost inputs side by side */
           <>
             <div style={S.cartQtyWrap}>
               <span style={S.cartQtyLabel}>qty</span>
-              <input
-                style={S.cartQtyInput}
+              <input style={S.cartQtyInput}
                 value={qty}
                 onChange={e => setQty(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && saveAndClose()}
                 autoFocus
-                placeholder="e.g. 2 pouches"
-              />
+                placeholder="e.g. 2 pouches"/>
             </div>
             <div style={S.cartQtyWrap}>
               <span style={S.cartQtyLabel}>₹</span>
-              <input
-                style={S.cartCostInput}
-                value={cost}
-                type="number"
+              <input style={S.cartCostInput}
+                value={cost} type="number"
                 onChange={e => setCost(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && saveAndClose()}
-                placeholder="0"
-              />
+                placeholder="0"/>
             </div>
           </>
         ) : (
-          /* Read-only mode */
           <>
-            {item.qty && <span style={{ fontSize:'11px', color:'#4A6357' }}>{item.qty}</span>}
+            {item.qty && (
+              <span style={{ fontSize:'11px', color:'#4A6357' }}>{item.qty}</span>
+            )}
             {item.qty && item.cost_inr > 0 && <span style={S.cartAdded}>·</span>}
             {item.cost_inr > 0 && (
               <span style={{ fontSize:'11px', color:'#4A6357' }}>
