@@ -1008,88 +1008,91 @@ const SH = {
 }
 
 // ── CartItemRow ───────────────────────────────────────────────
-// Shows item name, who it's for, who added it, and editable
-// qty + cost fields inline. Parents can edit; members see read-only.
+// Read-only by default. Parents tap ✎ to enter edit mode.
 function CartItemRow({ item, members, isParent, onRemove, onQtyChange, onCostChange }) {
-  const [qty, setQty]   = useState(item.qty || '')
-  const [cost, setCost] = useState(item.cost_inr ? String(item.cost_inr) : '')
+  const [editing, setEditing] = useState(false)
+  const [qty, setQty]         = useState(item.qty || '')
+  const [cost, setCost]       = useState(item.cost_inr ? String(item.cost_inr) : '')
 
-  // Keep local state in sync if parent re-fetches data
-  useEffect(() => { setQty(item.qty || '') },       [item.qty])
-  useEffect(() => { setCost(item.cost_inr ? String(item.cost_inr) : '') }, [item.cost_inr])
+  // Sync if parent re-fetches
+  useEffect(() => { if (!editing) setQty(item.qty || '') },  [item.qty, editing])
+  useEffect(() => { if (!editing) setCost(item.cost_inr ? String(item.cost_inr) : '') }, [item.cost_inr, editing])
 
-  // Find who added this item
   const adder = members?.find(m => m.id === item.added_by)
-  const adderLabel = adder ? adder.name : null
 
-  function commitQty() {
-    const trimmed = qty.trim()
-    if (trimmed && trimmed !== item.qty) onQtyChange(trimmed)
-  }
-
-  function commitCost() {
+  function saveAndClose() {
+    const trimmedQty = qty.trim()
+    if (trimmedQty && trimmedQty !== item.qty) onQtyChange(trimmedQty)
     const n = parseInt(cost) || 0
     if (n !== item.cost_inr) onCostChange(n)
+    setEditing(false)
   }
 
   return (
     <div style={S.cartItem}>
-      {/* Top row: name + for tag + remove */}
+      {/* Top row — always visible */}
       <div style={S.cartItemTop}>
         <div style={{ flex:1, fontSize:'13px', color:'#1A2E22', minWidth:0 }}>
           {item.name}
           <span style={S.forTag}>for {item.for_whom}</span>
         </div>
-        {isParent && (
+        {isParent && !editing && (
+          <button style={S.editBtn} onClick={() => setEditing(true)}>✎</button>
+        )}
+        {isParent && editing && (
+          <button style={{ ...S.editBtn, color:'#2D6A4F', fontWeight:'500' }}
+            onClick={saveAndClose}>Done</button>
+        )}
+        {isParent && !editing && (
           <button style={S.delBtn} onClick={onRemove}>×</button>
         )}
       </div>
 
-      {/* Bottom row: added by + editable qty + editable cost */}
+      {/* Meta row — added by + qty/cost (read-only or editable) */}
       <div style={S.cartItemMeta}>
-
-        {/* Who added */}
-        {adderLabel && (
-          <span style={S.cartAdded}>added by {adderLabel} ·</span>
+        {adder && (
+          <span style={S.cartAdded}>added by {adder.name}</span>
         )}
+        {adder && <span style={S.cartAdded}>·</span>}
 
-        {/* Qty — editable for parents */}
-        <div style={S.cartQtyWrap}>
-          <span style={S.cartQtyLabel}>qty</span>
-          {isParent ? (
-            <input
-              style={S.cartQtyInput}
-              value={qty}
-              onChange={e => setQty(e.target.value)}
-              onBlur={commitQty}
-              onKeyDown={e => e.key === 'Enter' && e.target.blur()}
-              placeholder="qty"
-            />
-          ) : (
-            <span style={{ fontSize:'12px', color:'#4A6357' }}>{item.qty || '—'}</span>
-          )}
-        </div>
-
-        {/* Cost — editable for parents */}
-        <div style={S.cartQtyWrap}>
-          <span style={S.cartQtyLabel}>₹</span>
-          {isParent ? (
-            <input
-              style={S.cartCostInput}
-              value={cost}
-              type="number"
-              onChange={e => setCost(e.target.value)}
-              onBlur={commitCost}
-              onKeyDown={e => e.key === 'Enter' && e.target.blur()}
-              placeholder="0"
-            />
-          ) : (
-            <span style={{ fontSize:'12px', color:'#4A6357' }}>
-              {item.cost_inr ? item.cost_inr.toLocaleString('en-IN') : '—'}
-            </span>
-          )}
-        </div>
-
+        {editing ? (
+          /* Edit mode — qty and cost inputs side by side */
+          <>
+            <div style={S.cartQtyWrap}>
+              <span style={S.cartQtyLabel}>qty</span>
+              <input
+                style={S.cartQtyInput}
+                value={qty}
+                onChange={e => setQty(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && saveAndClose()}
+                autoFocus
+                placeholder="e.g. 2 pouches"
+              />
+            </div>
+            <div style={S.cartQtyWrap}>
+              <span style={S.cartQtyLabel}>₹</span>
+              <input
+                style={S.cartCostInput}
+                value={cost}
+                type="number"
+                onChange={e => setCost(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && saveAndClose()}
+                placeholder="0"
+              />
+            </div>
+          </>
+        ) : (
+          /* Read-only mode */
+          <>
+            {item.qty && <span style={{ fontSize:'11px', color:'#4A6357' }}>{item.qty}</span>}
+            {item.qty && item.cost_inr > 0 && <span style={S.cartAdded}>·</span>}
+            {item.cost_inr > 0 && (
+              <span style={{ fontSize:'11px', color:'#4A6357' }}>
+                ₹{item.cost_inr.toLocaleString('en-IN')}
+              </span>
+            )}
+          </>
+        )}
       </div>
     </div>
   )
